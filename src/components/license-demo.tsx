@@ -23,7 +23,8 @@ export function LicenseDemo() {
   useEffect(() => {
     const saved = localStorage.getItem("presetkey-device") || crypto.randomUUID();
     localStorage.setItem("presetkey-device", saved);
-    setFingerprint(saved);
+    const timer = window.setTimeout(() => setFingerprint(saved), 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   async function register(event: FormEvent) {

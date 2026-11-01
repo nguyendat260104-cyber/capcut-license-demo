@@ -9,6 +9,8 @@ function writeText(path, value) {
   return $(value).writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null);
 }
 
+// JXA invokes this function by name when osascript starts the file.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function run(argv) {
   const rootPath = argv[0];
   const storePath = rootPath + "/CombinationPresetVirtualStore.json";
@@ -16,7 +18,7 @@ function run(argv) {
   let store = { preset_virtual_store: [{ type: 0, value: [] }] };
   const current = readText(storePath);
   if (current) {
-    try { store = JSON.parse(current); } catch (_) {}
+    try { store = JSON.parse(current); } catch {}
     manager.copyItemAtPathToPathError(storePath, storePath + ".presetkey.bak", null);
   }
   if (!Array.isArray(store.preset_virtual_store) || !store.preset_virtual_store.length) {
@@ -44,7 +46,7 @@ function run(argv) {
           name: String(meta.name || name), save_from: 0, subsystem_id: "", type: 1, user_id: "" });
         ids.add(String(meta.id));
         break;
-      } catch (_) {}
+      } catch {}
     }
   });
   writeText(storePath + ".tmp", JSON.stringify(store, null, 2));
