@@ -10,11 +10,9 @@ Console.OutputEncoding = Encoding.UTF8;
 Console.Title = "PresetKey — Cài preset CapCut";
 
 var apiBase = Environment.GetEnvironmentVariable("PRESETKEY_API_URL")?.TrimEnd('/')
-    ?? "https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app";
+    ?? "https://capcut-license-demo.vercel.app";
 
 Console.WriteLine("PRESETKEY · CÀI PRESET CAPCUT CHO WINDOWS\n");
-if (apiBase.Contains("REPLACE-WITH")) Fail("Chưa cấu hình PRESETKEY_API_URL cho bộ cài.");
-
 Console.Write("License key: ");
 var licenseKey = (Console.ReadLine() ?? "").Trim().ToUpperInvariant();
 if (licenseKey.Length < 10) Fail("License key không hợp lệ.");

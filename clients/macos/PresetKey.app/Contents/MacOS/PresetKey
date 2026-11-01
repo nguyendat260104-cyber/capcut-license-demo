@@ -1,13 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-API_BASE="${PRESETKEY_API_URL:-https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app}"
+API_BASE="${PRESETKEY_API_URL:-https://capcut-license-demo.vercel.app}"
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 alert() { /usr/bin/osascript -e "display alert \"PresetKey\" message \"$1\" as critical" >/dev/null; }
 notify() { /usr/bin/osascript -e "display alert \"PresetKey\" message \"$1\"" >/dev/null; }
 
-if [[ "$API_BASE" == *"REPLACE-WITH"* ]]; then alert "Chưa cấu hình địa chỉ API cho bộ cài."; exit 1; fi
 if /usr/bin/pgrep -x CapCut >/dev/null 2>&1; then alert "Hãy lưu dự án và đóng CapCut trước khi cài."; exit 1; fi
 
 LICENSE_KEY=$(/usr/bin/osascript -e 'text returned of (display dialog "Nhập license key của bạn:" default answer "PKEY-" buttons {"Hủy", "Tiếp tục"} default button "Tiếp tục")' 2>/dev/null) || exit 0

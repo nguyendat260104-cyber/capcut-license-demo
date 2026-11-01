@@ -1,10 +1,21 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { db, ensureSchema } from "./db";
+import { readRecord, writeRecord } from "./store";
 
 export type LicenseRequest = { licenseKey?: string; deviceFingerprint?: string; deviceName?: string; platform?: string };
+export type LicenseRecord = {
+  id: string; customerName: string; email: string; keyHash: string; keyLast4: string;
+  status: "active" | "disabled"; maxDevices: number; createdAt: string;
+};
+export type ActivationRecord = {
+  id: string; licenseId: string; deviceHash: string; deviceName: string; platform: string;
+  activatedAt: string; lastSeenAt: string;
+};
 
 export const normalizeKey = (key: string) => key.trim().toUpperCase();
 export const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+export const keyPath = (keyHash: string) => `licenses/by-key/${keyHash}.json`;
+export const emailPath = (emailHash: string) => `licenses/by-email/${emailHash}.json`;
+export const activationPath = (licenseId: string) => `activations/${licenseId}.json`;
 
 export function createLicenseKey() {
   const raw = randomBytes(9).toString("hex").toUpperCase();
@@ -33,49 +44,40 @@ export function verifyActivation(token: string) {
 }
 
 export async function findLicense(rawKey: string) {
-  await ensureSchema();
-  const sql = db();
-  const [license] = await sql`select * from licenses where key_hash = ${sha256(normalizeKey(rawKey))} limit 1`;
-  return license;
+  return readRecord<LicenseRecord>(keyPath(sha256(normalizeKey(rawKey))));
 }
 
 export async function activateLicense(input: Required<LicenseRequest>) {
-  await ensureSchema();
-  const sql = db();
-  const keyHash = sha256(normalizeKey(input.licenseKey));
+  const license = await findLicense(input.licenseKey);
+  if (!license || license.status !== "active") throw new LicenseError("License không hợp lệ hoặc đã bị khóa.", 404);
+  const path = activationPath(license.id);
   const deviceHash = sha256(input.deviceFingerprint.trim());
+  const existing = await readRecord<ActivationRecord>(path);
 
-  return sql.begin(async (tx) => {
-    const [license] = await tx`select * from licenses where key_hash = ${keyHash} for update`;
-    if (!license || license.status !== "active") throw new LicenseError("License không hợp lệ hoặc đã bị khóa.", 404);
+  if (existing && existing.deviceHash !== deviceHash) {
+    throw new LicenseError("Key đã được kích hoạt trên thiết bị khác. Hãy gỡ thiết bị cũ trước.", 409);
+  }
 
-    const [existing] = await tx`select * from activations where license_id = ${license.id} and device_hash = ${deviceHash}`;
-    if (existing) {
-      await tx`update activations set last_seen_at = now(), device_name = ${input.deviceName} where id = ${existing.id}`;
-      return { license, activation: existing, token: signActivation(license.id, deviceHash), reused: true };
-    }
-
-    const [{ count }] = await tx`select count(*)::int as count from activations where license_id = ${license.id}`;
-    if (count >= license.max_devices) throw new LicenseError("Key đã được kích hoạt trên thiết bị khác. Hãy gỡ thiết bị cũ trước.", 409);
-
-    const id = randomUUID();
-    const [activation] = await tx`
-      insert into activations (id, license_id, device_hash, device_name, platform)
-      values (${id}, ${license.id}, ${deviceHash}, ${input.deviceName}, ${input.platform}) returning *`;
-    return { license, activation, token: signActivation(license.id, deviceHash), reused: false };
-  });
+  const now = new Date().toISOString();
+  const activation: ActivationRecord = existing
+    ? { ...existing, deviceName: input.deviceName, lastSeenAt: now }
+    : { id: randomUUID(), licenseId: license.id, deviceHash, deviceName: input.deviceName,
+        platform: input.platform, activatedAt: now, lastSeenAt: now };
+  await writeRecord(path, activation);
+  return { license, activation, token: signActivation(license.id, deviceHash), reused: Boolean(existing) };
 }
 
 export async function validateDevice(rawKey: string, fingerprint: string) {
-  await ensureSchema();
-  const sql = db();
-  const [row] = await sql`
-    select l.id as license_id, l.status, a.id as activation_id
-    from licenses l join activations a on a.license_id = l.id
-    where l.key_hash = ${sha256(normalizeKey(rawKey))} and a.device_hash = ${sha256(fingerprint.trim())} limit 1`;
-  if (!row || row.status !== "active") throw new LicenseError("Thiết bị chưa được kích hoạt cho key này.", 403);
-  await sql`update activations set last_seen_at = now() where id = ${row.activation_id}`;
-  return row;
+  const license = await findLicense(rawKey);
+  if (!license || license.status !== "active") throw new LicenseError("License không hợp lệ hoặc đã bị khóa.", 404);
+  const path = activationPath(license.id);
+  const activation = await readRecord<ActivationRecord>(path);
+  if (!activation || activation.deviceHash !== sha256(fingerprint.trim())) {
+    throw new LicenseError("Thiết bị chưa được kích hoạt cho key này.", 403);
+  }
+  activation.lastSeenAt = new Date().toISOString();
+  await writeRecord(path, activation);
+  return { licenseId: license.id, activationId: activation.id };
 }
 
 export class LicenseError extends Error {
