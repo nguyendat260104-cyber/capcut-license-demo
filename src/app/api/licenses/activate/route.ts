@@ -9,7 +9,7 @@ export async function POST(request: Request) {
       activated: true,
       reused: result.reused,
       activationId: result.activation.id,
-      deviceName: result.activation.device_name,
+      deviceName: result.activation.deviceName,
       token: result.token,
     });
   } catch (error) { return jsonError(error); }
