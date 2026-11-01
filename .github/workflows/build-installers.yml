@@ -1,0 +1,43 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Configure production API
+        shell: pwsh
+        run: |
+          if (-not '${{ vars.API_BASE_URL }}') { throw 'Set repository variable API_BASE_URL first.' }
+          $path = 'clients/windows/PresetKey.Installer/Program.cs'
+          (Get-Content $path -Raw).Replace('https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app', '${{ vars.API_BASE_URL }}') | Set-Content $path
+      - run: dotnet publish clients/windows/PresetKey.Installer/PresetKey.Installer.csproj -c Release
+      - run: choco install innosetup --no-progress -y
+      - run: iscc clients/windows/installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PresetKey-Windows
+          path: artifacts/*.exe
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure production API
+        run: |
+          test -n '${{ vars.API_BASE_URL }}' || (echo 'Set repository variable API_BASE_URL first.' && exit 1)
+          sed -i '' 's#https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app#${{ vars.API_BASE_URL }}#g' clients/macos/PresetKey.app/Contents/MacOS/PresetKey
+      - run: chmod +x clients/macos/build-pkg.sh clients/macos/PresetKey.app/Contents/MacOS/PresetKey
+      - run: clients/macos/build-pkg.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PresetKey-macOS
+          path: artifacts/*.pkg

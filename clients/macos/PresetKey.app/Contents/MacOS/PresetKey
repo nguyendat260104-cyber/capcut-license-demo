@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+API_BASE="${PRESETKEY_API_URL:-https://REPLACE-WITH-YOUR-VERCEL-DOMAIN.vercel.app}"
+APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+alert() { /usr/bin/osascript -e "display alert \"PresetKey\" message \"$1\" as critical" >/dev/null; }
+notify() { /usr/bin/osascript -e "display alert \"PresetKey\" message \"$1\"" >/dev/null; }
+
+if [[ "$API_BASE" == *"REPLACE-WITH"* ]]; then alert "Chưa cấu hình địa chỉ API cho bộ cài."; exit 1; fi
+if /usr/bin/pgrep -x CapCut >/dev/null 2>&1; then alert "Hãy lưu dự án và đóng CapCut trước khi cài."; exit 1; fi
+
+LICENSE_KEY=$(/usr/bin/osascript -e 'text returned of (display dialog "Nhập license key của bạn:" default answer "PKEY-" buttons {"Hủy", "Tiếp tục"} default button "Tiếp tục")' 2>/dev/null) || exit 0
+DEVICE_NAME="$(/usr/sbin/scutil --get ComputerName 2>/dev/null || /bin/hostname)"
+DEVICE_NAME_JSON="$(printf '%s' "$DEVICE_NAME" | /usr/bin/sed 's/\\/\\\\/g; s/"/\\"/g')"
+PLATFORM_UUID="$(/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice | /usr/bin/awk -F\" '/IOPlatformUUID/{print $(NF-1); exit}')"
+if [[ -z "$PLATFORM_UUID" ]]; then PLATFORM_UUID="$(/usr/sbin/system_profiler SPHardwareDataType | /usr/bin/awk -F': ' '/Serial Number/{print $2; exit}')"; fi
+FINGERPRINT="$(printf '%s' "${PLATFORM_UUID}|${DEVICE_NAME}|PresetKey-v1" | /usr/bin/shasum -a 256 | /usr/bin/awk '{print $1}')"
+
+WORK_DIR="$(/usr/bin/mktemp -d -t presetkey)"
+trap '/bin/rm -rf "$WORK_DIR"' EXIT
+
+HTTP_CODE=$(/usr/bin/curl -sS -o "$WORK_DIR/activate.json" -w '%{http_code}' -X POST "$API_BASE/api/licenses/activate" \
+  -H 'content-type: application/json' \
+  --data "$(/usr/bin/printf '{\"licenseKey\":\"%s\",\"deviceFingerprint\":\"%s\",\"deviceName\":\"%s\",\"platform\":\"macos\"}' "$LICENSE_KEY" "$FINGERPRINT" "$DEVICE_NAME_JSON")")
+if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then alert "Kích hoạt thất bại. Key có thể đã được dùng trên máy khác."; exit 1; fi
+
+HTTP_CODE=$(/usr/bin/curl -sS -o "$WORK_DIR/package.zip" -w '%{http_code}' -X POST "$API_BASE/api/licenses/download" \
+  -H 'content-type: application/json' \
+  --data "$(/usr/bin/printf '{\"licenseKey\":\"%s\",\"deviceFingerprint\":\"%s\"}' "$LICENSE_KEY" "$FINGERPRINT")")
+if [[ "$HTTP_CODE" -lt 200 || "$HTTP_CODE" -ge 300 ]]; then alert "Không tải được gói preset."; exit 1; fi
+
+/usr/bin/ditto -x -k "$WORK_DIR/package.zip" "$WORK_DIR/content"
+PRESETS_PATH="$HOME/Movies/CapCut/User Data/Presets/Combination/Presets"
+/bin/mkdir -p "$PRESETS_PATH"
+/usr/bin/ditto "$WORK_DIR/content/" "$PRESETS_PATH/"
+/usr/bin/osascript -l JavaScript "$APP_DIR/Resources/register-presets.js" "$PRESETS_PATH"
+notify "Cài đặt hoàn tất. Mở lại CapCut để sử dụng preset."
